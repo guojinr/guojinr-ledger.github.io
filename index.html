@@ -233,6 +233,11 @@
         await deleteDoc(doc(db, 'users', user.uid, 'transactions', id));
       };
 
+      const startEditBook = (book) => {
+        setEditingBookId(book.id);
+        setEditFormData({ name: book.name, targetAmount: book.targetAmount || '' });
+      };
+
       const saveEditBook = async () => {
         if (!editFormData.name || !user) return;
         await setDoc(doc(db, 'users', user.uid, 'books', editingBookId), {
