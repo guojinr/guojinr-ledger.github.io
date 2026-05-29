@@ -5,10 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>家族理財秘書</title>
   
-  <!-- 載入 Tailwind CSS 樣式 -->
   <script src="https://cdn.tailwindcss.com"></script>
   
-  <!-- 設定模組路徑，讓瀏覽器看得懂 React 和 Firebase -->
   <script type="importmap">
     {
       "imports": {
@@ -22,33 +20,26 @@
     }
   </script>
   
-  <!-- 載入 Babel (用來將 React 語法轉譯給瀏覽器) -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   
   <style>
-    /* 隱藏捲軸但保留捲動功能的樣式 */
     .scrollbar-hide::-webkit-scrollbar { display: none; }
     .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
   </style>
 </head>
 <body class="bg-[#FDF8F5]">
   
-  <!-- App 會渲染在這個 div 裡面 -->
   <div id="root"></div>
 
-  <!-- 主程式邏輯 -->
   <script type="text/babel" data-type="module">
     import React, { useState, useMemo, useEffect } from 'react';
     import { createRoot } from 'react-dom/client';
     import { ChevronLeft, ChevronRight, Plus, List, X, BookHeart, TrendingUp, TrendingDown, Wallet, Search, Trash2, Settings, Target, CheckCircle2, Share2, Camera, CheckSquare, Edit2, Check } from 'lucide-react';
     
     import { initializeApp } from 'firebase/app';
-    import { getAuth, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
+    import { getAuth, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signOut, signInAnonymously, signInWithCustomToken } from 'firebase/auth';
     import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc } from 'firebase/firestore';
 
-    // ==========================================
-    // 專屬於妳的 Firebase 雲端金庫鑰匙 🔑
-    // ==========================================
     const firebaseConfig = {
       apiKey: "AIzaSyCyrzCgmatWzD0vlYhO3Zam3PCFqs_381Y",
       authDomain: "family-ledger-f0684.firebaseapp.com",
@@ -63,26 +54,25 @@
     const app = initializeApp(firebaseConfig);
     const auth = getAuth(app);
     const db = getFirestore(app);
+
+    const isPreview = typeof __firebase_config !== 'undefined';
     const appId = typeof __app_id !== 'undefined' ? __app_id : 'family-ledger-app';
 
     function App() {
-      // --- 認證與登入狀態 ---
       const [user, setUser] = useState(null);
       const [isAuthLoading, setIsAuthLoading] = useState(true);
       const [loginError, setLoginError] = useState('');
 
-      // --- 雲端資料狀態 ---
       const [books, setBooks] = useState([]);
       const [transactions, setTransactions] = useState([]);
       const [currentBookId, setCurrentBookId] = useState('');
 
-      // --- UI 控制狀態 ---
       const [isAddModalOpen, setIsAddModalOpen] = useState(false);
       const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
       const [isManageBooksOpen, setIsManageBooksOpen] = useState(false);
       const [isShareViewOpen, setIsShareViewOpen] = useState(false);
       
-      const [currentDate, setCurrentDate] = useState(new Date(2026, 4, 29)); // 預設顯示 2026 年 5 月
+      const [currentDate, setCurrentDate] = useState(new Date(2026, 4, 29));
       const [selectedDate, setSelectedDate] = useState(null);
       const [selectedMonth, setSelectedMonth] = useState('2026-05');
       const [searchQuery, setSearchQuery] = useState('');
@@ -96,7 +86,6 @@
       const [editingTxId, setEditingTxId] = useState(null);
       const [editTxFormData, setEditTxFormData] = useState({ date: '', type: 'expense', amount: '', title: '', isCompleted: false });
 
-      // --- 1. 處理會員登入 (Auth) ---
       useEffect(() => {
         const initAuth = async () => {
           try {
@@ -129,13 +118,11 @@
         }
       };
 
-      // --- 2. 監聽雲端資料庫 (Firestore) ---
       useEffect(() => {
         if (!user) return;
 
-        // 修正路徑以符合安全規範與 Canvas 測試環境
-        const booksRef = collection(db, 'artifacts', appId, 'users', user.uid, 'books');
-        const txRef = collection(db, 'artifacts', appId, 'users', user.uid, 'transactions');
+        const booksRef = collection(db, isPreview ? `artifacts/${appId}/users` : 'users', user.uid, 'books');
+        const txRef = collection(db, isPreview ? `artifacts/${appId}/users` : 'users', user.uid, 'transactions');
 
         const unsubBooks = onSnapshot(booksRef, async (snapshot) => {
           const booksData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -147,7 +134,7 @@
               { id: '5', name: '我的主帳本', type: 'standard', targetAmount: 0 }
             ];
             for (const b of defaultBooks) {
-              await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'books', b.id), b);
+              await setDoc(doc(db, isPreview ? `artifacts/${appId}/users` : 'users', user.uid, 'books', b.id), b);
             }
           } else {
             setBooks(booksData);
@@ -164,8 +151,6 @@
         return () => { unsubBooks(); unsubTx(); };
       }, [user, currentBookId]);
 
-
-      // --- 衍生資料 ---
       const currentBook = books.find(b => b.id === currentBookId);
       const currentYear = currentDate.getFullYear();
 
@@ -211,7 +196,6 @@
         return amount.toString();
       };
 
-      // --- 互動處理 (雲端寫入) ---
       const handleAddTransaction = async (e) => {
         e.preventDefault();
         if (!formData.amount || !formData.title || !user) return;
@@ -228,66 +212,91 @@
         };
 
         try {
-          await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'transactions', newId), newTx);
+          await setDoc(doc(db, isPreview ? `artifacts/${appId}/users` : 'users', user.uid, 'transactions', newId), newTx);
           if (currentBook?.type === 'target') setSelectedMonth(formData.date.substring(0, 7));
           setFormData({ ...formData, amount: '', title: '', isCompleted: false });
-        } catch (error) {
-          console.error("儲存明細失敗:", error);
+        } catch(err) {
+          console.error(err);
         } finally {
           setIsAddModalOpen(false);
         }
       };
 
-      const saveEditTx = async () => {
+      // 修正：強化點擊阻擋，並給予完整預設值防止 React 報錯
+      const startEditTx = (tx, e) => {
+        e.preventDefault();  // 阻擋預設行為
+        e.stopPropagation(); // 阻擋事件冒泡
+        setEditingTxId(tx.id);
+        setEditTxFormData({ 
+          ...tx,
+          amount: tx.amount || '',
+          title: tx.title || '',
+          date: tx.date || '',
+          type: tx.type || 'expense',
+          isCompleted: !!tx.isCompleted // 確保是 boolean
+        });
+      };
+
+      const saveEditTx = async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
         if (!editTxFormData.amount || !editTxFormData.title || !user) return;
         try {
-          await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'transactions', editingTxId), { 
+          await setDoc(doc(db, isPreview ? `artifacts/${appId}/users` : 'users', user.uid, 'transactions', editingTxId), { 
             ...editTxFormData, 
             amount: Number(editTxFormData.amount) 
           }, { merge: true });
-        } catch (error) {
-          console.error("修改明細失敗:", error);
+        } catch(err) {
+          console.error(err);
         } finally {
           setEditingTxId(null);
         }
       };
 
-      const deleteTx = async (id) => {
+      const deleteTx = async (id, e) => {
+        e.preventDefault();
+        e.stopPropagation();
         if (!user) return;
         try {
-          await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'transactions', id));
-        } catch (error) {
-          console.error("刪除明細失敗:", error);
+          await deleteDoc(doc(db, isPreview ? `artifacts/${appId}/users` : 'users', user.uid, 'transactions', id));
+        } catch(err) {
+          console.error(err);
         }
       };
 
-      const startEditBook = (book) => {
+      const startEditBook = (book, e) => {
+        e.preventDefault();
+        e.stopPropagation();
         setEditingBookId(book.id);
         setEditFormData({ name: book.name, targetAmount: book.targetAmount || '' });
       };
 
-      const saveEditBook = async () => {
+      const saveEditBook = async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
         if (!editFormData.name || !user) return;
         try {
           const bookToEdit = books.find(b => b.id === editingBookId);
-          await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'books', editingBookId), {
+          await setDoc(doc(db, isPreview ? `artifacts/${appId}/users` : 'users', user.uid, 'books', editingBookId), {
             name: editFormData.name,
             targetAmount: bookToEdit?.type === 'target' ? Number(editFormData.targetAmount) : 0
           }, { merge: true });
-        } catch (error) {
-          console.error("修改帳本失敗:", error);
+        } catch(err) {
+          console.error(err);
         } finally {
           setEditingBookId(null);
         }
       };
 
-      const handleDeleteBook = async (id) => {
+      const handleDeleteBook = async (id, e) => {
+        e.preventDefault();
+        e.stopPropagation();
         if (books.length <= 1 || !user) return alert('至少要保留一個帳本喔！');
         try {
-          await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'books', id));
+          await deleteDoc(doc(db, isPreview ? `artifacts/${appId}/users` : 'users', user.uid, 'books', id));
           if (currentBookId === id) setCurrentBookId(books.filter(b => b.id !== id)[0].id);
-        } catch (error) {
-          console.error("刪除帳本失敗:", error);
+        } catch(err) {
+          console.error(err);
         }
       };
 
@@ -296,15 +305,15 @@
         if (!newBookData.name || !user) return;
         const newId = Date.now().toString();
         try {
-          await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'books', newId), {
+          await setDoc(doc(db, isPreview ? `artifacts/${appId}/users` : 'users', user.uid, 'books', newId), {
             id: newId,
             name: newBookData.name,
             type: newBookData.type,
             targetAmount: newBookData.type === 'target' ? Number(newBookData.targetAmount) : 0
           });
           setNewBookData({ name: '', type: 'standard', targetAmount: '' });
-        } catch (error) {
-          console.error("新增帳本失敗:", error);
+        } catch(err) {
+          console.error(err);
         }
       };
 
@@ -325,7 +334,10 @@
       const renderTxItem = (tx) => {
         if (editingTxId === tx.id) {
           return (
-            <div key={tx.id} className="bg-white p-4 rounded-2xl shadow-sm border border-rose-200 flex flex-col gap-3 animate-in fade-in w-full">
+            <div key={tx.id} className="bg-white p-4 rounded-2xl shadow-md border-2 border-rose-300 flex flex-col gap-3 animate-in fade-in w-full relative z-10">
+              <div className="flex justify-between items-center mb-1">
+                <span className="text-xs font-black text-rose-500 bg-rose-50 px-2 py-1 rounded-md">編輯模式</span>
+              </div>
               <input type="date" value={editTxFormData.date} onChange={e => setEditTxFormData({...editTxFormData, date: e.target.value})} className="w-full bg-gray-50 p-2.5 rounded-xl outline-none font-bold text-sm border border-transparent focus:border-rose-400" />
               <input type="text" value={editTxFormData.title} onChange={e => setEditTxFormData({...editTxFormData, title: e.target.value})} className="w-full bg-gray-50 p-2.5 rounded-xl outline-none font-bold text-sm border border-transparent focus:border-rose-400" placeholder="請輸入項目名稱" />
               <div className="flex items-center gap-2 bg-gray-50 p-2.5 rounded-xl border border-transparent focus-within:border-rose-400">
@@ -334,26 +346,26 @@
               </div>
               {currentBook?.type === 'standard' && (
                 <div className="flex gap-2">
-                  <button type="button" onClick={() => setEditTxFormData({...editTxFormData, type: 'expense'})} className={`flex-1 py-2 text-xs rounded-lg font-black transition-all ${editTxFormData.type === 'expense' ? 'bg-rose-500 text-white' : 'bg-gray-100 text-gray-500'}`}>支出</button>
-                  <button type="button" onClick={() => setEditTxFormData({...editTxFormData, type: 'income'})} className={`flex-1 py-2 text-xs rounded-lg font-black transition-all ${editTxFormData.type === 'income' ? 'bg-green-500 text-white' : 'bg-gray-100 text-gray-500'}`}>收入</button>
+                  <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setEditTxFormData({...editTxFormData, type: 'expense'}); }} className={`flex-1 py-2 text-xs rounded-lg font-black transition-all ${editTxFormData.type === 'expense' ? 'bg-rose-500 text-white' : 'bg-gray-100 text-gray-500'}`}>支出</button>
+                  <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setEditTxFormData({...editTxFormData, type: 'income'}); }} className={`flex-1 py-2 text-xs rounded-lg font-black transition-all ${editTxFormData.type === 'income' ? 'bg-green-500 text-white' : 'bg-gray-100 text-gray-500'}`}>收入</button>
                 </div>
               )}
               {currentBook?.type === 'target' && (
                 <label className={`flex items-center gap-2 p-2.5 rounded-xl cursor-pointer transition-colors border ${editTxFormData.isCompleted ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-transparent'}`}>
-                  <input type="checkbox" checked={editTxFormData.isCompleted} onChange={e => setEditTxFormData({...editTxFormData, isCompleted: e.target.checked})} className="w-4 h-4 text-green-500 rounded accent-green-500" />
+                  <input type="checkbox" checked={!!editTxFormData.isCompleted} onChange={e => setEditTxFormData({...editTxFormData, isCompleted: e.target.checked})} className="w-4 h-4 text-green-500 rounded accent-green-500" />
                   <span className="text-xs font-black text-green-700">確認結算此月</span>
                 </label>
               )}
-              <div className="flex justify-end gap-2 mt-1">
-                <button onClick={() => setEditingTxId(null)} className="px-4 py-2 bg-gray-100 text-gray-500 rounded-xl text-xs font-black hover:bg-gray-200 transition-colors">取消</button>
-                <button onClick={saveEditTx} className="px-4 py-2 bg-rose-500 text-white rounded-xl text-xs font-black flex items-center gap-1 hover:bg-rose-600 transition-colors"><Check size={14}/>儲存</button>
+              <div className="flex justify-end gap-2 mt-2">
+                <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setEditingTxId(null); }} className="px-5 py-2.5 bg-gray-100 text-gray-600 rounded-xl text-xs font-black hover:bg-gray-200 transition-colors">取消</button>
+                <button type="button" onClick={saveEditTx} className="px-5 py-2.5 bg-rose-500 text-white rounded-xl text-xs font-black flex items-center gap-1 hover:bg-rose-600 transition-colors shadow-md shadow-rose-500/20"><Check size={14}/>儲存</button>
               </div>
             </div>
           );
         }
 
         return (
-          <div key={tx.id} className="bg-white p-3.5 rounded-2xl flex items-center justify-between shadow-sm border border-gray-50 hover:border-rose-100 transition-colors group w-full">
+          <div key={tx.id} className="bg-white p-3.5 rounded-2xl flex items-center justify-between shadow-sm border border-gray-50 hover:border-rose-100 transition-colors group w-full relative">
             <div className="flex flex-col gap-1.5 flex-1 pr-2 min-w-0">
               <span className="text-[10px] font-black text-gray-400 bg-gray-100 px-2 py-0.5 rounded-md w-fit tracking-wider">{tx.date}</span>
               <span className="font-bold text-gray-700 flex items-center gap-1.5 truncate text-sm">
@@ -365,21 +377,20 @@
               <span className={`font-black text-lg ${tx.type === 'income' ? 'text-green-500' : 'text-rose-500'}`}>
                 {tx.type === 'income' ? '+' : '-'}${tx.amount.toLocaleString()}
               </span>
-              <div className="flex flex-col gap-1 pl-1 border-l border-gray-100">
-                <button onClick={() => startEditTx(tx)} className="p-1.5 text-gray-300 hover:text-blue-500 hover:bg-blue-50 rounded-lg transition-colors"><Edit2 size={14} /></button>
-                <button onClick={() => deleteTx(tx.id)} className="p-1.5 text-gray-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-colors"><Trash2 size={14} /></button>
+              {/* 修正：增加 gap-1.5 和 padding (p-2) 讓手機版更容易按到，並補上 type="button" */}
+              <div className="flex flex-col gap-1.5 pl-2 border-l border-gray-100 ml-1">
+                <button type="button" onClick={(e) => startEditTx(tx, e)} className="p-2 text-gray-300 hover:text-blue-500 hover:bg-blue-50 rounded-xl transition-colors cursor-pointer"><Edit2 size={16} /></button>
+                <button type="button" onClick={(e) => deleteTx(tx.id, e)} className="p-2 text-gray-300 hover:text-rose-500 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer"><Trash2 size={16} /></button>
               </div>
             </div>
           </div>
         );
       };
 
-      // --- 渲染：全螢幕載入中 ---
       if (isAuthLoading) {
         return <div className="min-h-screen bg-[#FDF8F5] flex items-center justify-center font-black text-rose-400 text-xl tracking-widest">載入中...</div>;
       }
 
-      // --- 渲染：Google 登入畫面 ---
       if (!user) {
         return (
           <div className="min-h-screen bg-[#FDF8F5] flex items-center justify-center p-4 font-sans text-gray-800">
@@ -402,12 +413,10 @@
         return <div className="min-h-screen bg-[#FDF8F5] flex items-center justify-center font-black text-rose-400 text-xl tracking-widest">初始化專屬帳本中...</div>;
       }
 
-      // --- 渲染：主畫面 ---
       return (
         <div className="min-h-screen bg-[#FDF8F5] font-sans text-gray-800 flex justify-center pb-28">
           <div className="w-full max-w-md bg-[#FDF8F5] min-h-screen flex flex-col relative">
             
-            {/* 頂部卡片 */}
             <div className="p-4 z-10 shrink-0">
               <div className="bg-white rounded-3xl p-5 shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-rose-50 relative overflow-hidden">
                 <div className="absolute top-[-20px] right-[-20px] w-24 h-24 bg-rose-200/50 rounded-full blur-2xl"></div>
@@ -449,10 +458,8 @@
               </div>
             </div>
 
-            {/* 內容區域 */}
             <div className="px-4 pb-4 flex flex-col gap-4">
               
-              {/* 家用版 */}
               {currentBook?.type === 'target' && (
                 <div className="flex flex-col gap-4">
                   <div className="flex justify-between items-center px-4 bg-white py-3 rounded-2xl shadow-[0_4px_20px_rgb(0,0,0,0.03)] border border-rose-50">
@@ -524,7 +531,6 @@
                 </div>
               )}
 
-              {/* 一般版 */}
               {currentBook?.type === 'standard' && (
                 <div className="flex flex-col gap-4">
                   <div className="flex justify-between items-center px-4 bg-white py-3 rounded-2xl shadow-[0_4px_20px_rgb(0,0,0,0.03)] border border-rose-50">
@@ -593,7 +599,6 @@
               )}
             </div>
 
-            {/* 底部懸浮按鈕區 */}
             <div className="fixed bottom-4 left-0 right-0 px-4 flex justify-center z-40 pointer-events-none">
               <div className="w-full max-w-md flex gap-3 pointer-events-auto bg-white/70 backdrop-blur-xl p-2 rounded-[2rem] shadow-[0_10px_40px_rgba(0,0,0,0.1)] border border-white">
                 <button 
@@ -616,7 +621,6 @@
             </div>
           </div>
 
-          {/* 彈出視窗：新增記帳 */}
           {isAddModalOpen && (
             <div className="fixed inset-0 bg-gray-900/40 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-4">
               <div className="bg-white w-full max-w-md rounded-[2.5rem] p-7 relative shadow-2xl">
@@ -677,7 +681,6 @@
             </div>
           )}
 
-          {/* 彈出視窗：所有明細 */}
           {isDetailsModalOpen && (
             <div className="fixed inset-0 bg-gray-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
               <div className="bg-white w-full max-w-md h-[85vh] rounded-[2.5rem] flex flex-col overflow-hidden relative shadow-2xl">
@@ -711,14 +714,15 @@
             </div>
           )}
 
-          {/* 彈出視窗：管理帳本 */}
           {isManageBooksOpen && (
             <div className="fixed inset-0 bg-gray-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
               <div className="bg-white w-full max-w-md max-h-[85vh] rounded-[2.5rem] flex flex-col overflow-hidden relative shadow-2xl">
                 <div className="p-6 border-b border-gray-100 flex justify-between items-center shrink-0">
                   <h2 className="text-xl font-black flex items-center gap-2"><Settings size={20} className="text-gray-400" /> 帳本管理</h2>
                   <div className="flex items-center gap-2">
-                    <button onClick={() => signOut(auth)} className="text-xs font-black bg-gray-100 text-gray-500 px-3 py-1.5 rounded-lg hover:bg-gray-200 transition-colors">登出</button>
+                    {!isPreview && (
+                      <button onClick={() => signOut(auth)} className="text-xs font-black bg-gray-100 text-gray-500 px-3 py-1.5 rounded-lg hover:bg-gray-200 transition-colors">登出</button>
+                    )}
                     <button onClick={() => setIsManageBooksOpen(false)} className="p-2 bg-gray-100 rounded-full hover:bg-gray-200"><X size={20} /></button>
                   </div>
                 </div>
@@ -749,7 +753,7 @@
                                 </div>
                               )}
                               <div className="flex justify-end gap-2 mt-1">
-                                <button onClick={() => setEditingBookId(null)} className="px-4 py-2 bg-gray-100 text-gray-500 rounded-xl text-xs font-black hover:bg-gray-200">取消</button>
+                                <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); setEditingBookId(null); }} className="px-4 py-2 bg-gray-100 text-gray-500 rounded-xl text-xs font-black hover:bg-gray-200">取消</button>
                                 <button onClick={saveEditBook} className="px-4 py-2 bg-rose-500 text-white rounded-xl text-xs font-black flex items-center gap-1 hover:bg-rose-600"><Check size={14}/>儲存</button>
                               </div>
                             </div>
@@ -762,8 +766,8 @@
                                 </span>
                               </div>
                               <div className="flex gap-1">
-                                <button onClick={() => startEditBook(book)} className="p-2 text-gray-300 hover:text-blue-500 hover:bg-blue-50 rounded-xl transition-all"><Edit2 size={18} /></button>
-                                <button onClick={() => handleDeleteBook(book.id)} className="p-2 text-gray-300 hover:text-rose-500 hover:bg-rose-50 rounded-xl transition-all"><Trash2 size={18} /></button>
+                                <button onClick={(e) => startEditBook(book, e)} className="p-2 text-gray-300 hover:text-blue-500 hover:bg-blue-50 rounded-xl transition-all"><Edit2 size={18} /></button>
+                                <button onClick={(e) => handleDeleteBook(book.id, e)} className="p-2 text-gray-300 hover:text-rose-500 hover:bg-rose-50 rounded-xl transition-all"><Trash2 size={18} /></button>
                               </div>
                             </div>
                           )}
@@ -798,7 +802,6 @@
             </div>
           )}
 
-          {/* 彈出視窗：分享畫面 */}
           {isShareViewOpen && (
             <div className="fixed inset-0 bg-gray-900/90 backdrop-blur-md flex flex-col items-center justify-center z-[60] p-4">
               <div className="bg-[#FDF8F5] w-full max-w-sm rounded-[2.5rem] p-7 shadow-2xl relative overflow-y-auto max-h-[85vh] scrollbar-hide">
@@ -857,7 +860,7 @@
                               ${isCompleted ? (isTargetReached ? 'border-green-300 bg-green-50/50' : 'border-emerald-200 bg-emerald-50/30') : ''}
                             `}>
                               {isCompleted ? (
-                                <CheckCircle2 size={24} className={`${isTargetReached ? 'text-green-500 drop-shadow-sm' : 'text-emerald-300'}`} strokeWidth={3} />
+                                <CheckCircle2 size={24} className={`${isTargetReached ? 'text-green-500 drop-shadow-sm' : 'text-emerald-300'} ${isSelected ? 'animate-bounce' : ''}`} strokeWidth={3} />
                               ) : (
                                 <>
                                   <span className="text-[10px] font-black text-gray-700">{monthNum}月</span>
@@ -910,7 +913,6 @@
       );
     }
 
-    // 啟動 React
     const root = createRoot(document.getElementById('root'));
     root.render(<App />);
   </script>
