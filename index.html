@@ -63,6 +63,7 @@
     const app = initializeApp(firebaseConfig);
     const auth = getAuth(app);
     const db = getFirestore(app);
+    const appId = typeof __app_id !== 'undefined' ? __app_id : 'family-ledger-app';
 
     function App() {
       // --- 認證與登入狀態 ---
@@ -97,6 +98,19 @@
 
       // --- 1. 處理會員登入 (Auth) ---
       useEffect(() => {
+        const initAuth = async () => {
+          try {
+            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+              await signInWithCustomToken(auth, __initial_auth_token);
+            } else if (isPreview) {
+              await signInAnonymously(auth);
+            }
+          } catch (e) {
+            console.error("Auth error", e);
+          }
+        };
+        initAuth();
+
         const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
           setUser(currentUser);
           setIsAuthLoading(false);
@@ -119,9 +133,9 @@
       useEffect(() => {
         if (!user) return;
 
-        // 簡化了資料庫路徑，直接存在 users 底下，讓妳未來查看更方便
-        const booksRef = collection(db, 'users', user.uid, 'books');
-        const txRef = collection(db, 'users', user.uid, 'transactions');
+        // 修正路徑以符合安全規範與 Canvas 測試環境
+        const booksRef = collection(db, 'artifacts', appId, 'users', user.uid, 'books');
+        const txRef = collection(db, 'artifacts', appId, 'users', user.uid, 'transactions');
 
         const unsubBooks = onSnapshot(booksRef, async (snapshot) => {
           const booksData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -133,7 +147,7 @@
               { id: '5', name: '我的主帳本', type: 'standard', targetAmount: 0 }
             ];
             for (const b of defaultBooks) {
-              await setDoc(doc(db, 'users', user.uid, 'books', b.id), b);
+              await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'books', b.id), b);
             }
           } else {
             setBooks(booksData);
@@ -213,24 +227,38 @@
           isCompleted: formData.isCompleted
         };
 
-        await setDoc(doc(db, 'users', user.uid, 'transactions', newId), newTx);
-        setIsAddModalOpen(false);
-        if (currentBook?.type === 'target') setSelectedMonth(formData.date.substring(0, 7));
-        setFormData({ ...formData, amount: '', title: '', isCompleted: false });
+        try {
+          await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'transactions', newId), newTx);
+          if (currentBook?.type === 'target') setSelectedMonth(formData.date.substring(0, 7));
+          setFormData({ ...formData, amount: '', title: '', isCompleted: false });
+        } catch (error) {
+          console.error("儲存明細失敗:", error);
+        } finally {
+          setIsAddModalOpen(false);
+        }
       };
 
       const saveEditTx = async () => {
         if (!editTxFormData.amount || !editTxFormData.title || !user) return;
-        await setDoc(doc(db, 'users', user.uid, 'transactions', editingTxId), { 
-          ...editTxFormData, 
-          amount: Number(editTxFormData.amount) 
-        }, { merge: true });
-        setEditingTxId(null);
+        try {
+          await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'transactions', editingTxId), { 
+            ...editTxFormData, 
+            amount: Number(editTxFormData.amount) 
+          }, { merge: true });
+        } catch (error) {
+          console.error("修改明細失敗:", error);
+        } finally {
+          setEditingTxId(null);
+        }
       };
 
       const deleteTx = async (id) => {
         if (!user) return;
-        await deleteDoc(doc(db, 'users', user.uid, 'transactions', id));
+        try {
+          await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'transactions', id));
+        } catch (error) {
+          console.error("刪除明細失敗:", error);
+        }
       };
 
       const startEditBook = (book) => {
@@ -240,30 +268,44 @@
 
       const saveEditBook = async () => {
         if (!editFormData.name || !user) return;
-        await setDoc(doc(db, 'users', user.uid, 'books', editingBookId), {
-          name: editFormData.name,
-          targetAmount: currentBook?.type === 'target' ? Number(editFormData.targetAmount) : 0
-        }, { merge: true });
-        setEditingBookId(null);
+        try {
+          const bookToEdit = books.find(b => b.id === editingBookId);
+          await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'books', editingBookId), {
+            name: editFormData.name,
+            targetAmount: bookToEdit?.type === 'target' ? Number(editFormData.targetAmount) : 0
+          }, { merge: true });
+        } catch (error) {
+          console.error("修改帳本失敗:", error);
+        } finally {
+          setEditingBookId(null);
+        }
       };
 
       const handleDeleteBook = async (id) => {
         if (books.length <= 1 || !user) return alert('至少要保留一個帳本喔！');
-        await deleteDoc(doc(db, 'users', user.uid, 'books', id));
-        if (currentBookId === id) setCurrentBookId(books.filter(b => b.id !== id)[0].id);
+        try {
+          await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'books', id));
+          if (currentBookId === id) setCurrentBookId(books.filter(b => b.id !== id)[0].id);
+        } catch (error) {
+          console.error("刪除帳本失敗:", error);
+        }
       };
 
       const handleAddBook = async (e) => {
         e.preventDefault();
         if (!newBookData.name || !user) return;
         const newId = Date.now().toString();
-        await setDoc(doc(db, 'users', user.uid, 'books', newId), {
-          id: newId,
-          name: newBookData.name,
-          type: newBookData.type,
-          targetAmount: newBookData.type === 'target' ? Number(newBookData.targetAmount) : 0
-        });
-        setNewBookData({ name: '', type: 'standard', targetAmount: '' });
+        try {
+          await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'books', newId), {
+            id: newId,
+            name: newBookData.name,
+            type: newBookData.type,
+            targetAmount: newBookData.type === 'target' ? Number(newBookData.targetAmount) : 0
+          });
+          setNewBookData({ name: '', type: 'standard', targetAmount: '' });
+        } catch (error) {
+          console.error("新增帳本失敗:", error);
+        }
       };
 
       const handlePrevPeriod = () => {
