@@ -55,9 +55,6 @@
     const auth = getAuth(app);
     const db = getFirestore(app);
 
-    const isPreview = typeof __firebase_config !== 'undefined';
-    const appId = typeof __app_id !== 'undefined' ? __app_id : 'family-ledger-app';
-
     function App() {
       const [user, setUser] = useState(null);
       const [isAuthLoading, setIsAuthLoading] = useState(true);
@@ -87,19 +84,6 @@
       const [editTxFormData, setEditTxFormData] = useState({ date: '', type: 'expense', amount: '', title: '', isCompleted: false });
 
       useEffect(() => {
-        const initAuth = async () => {
-          try {
-            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-              await signInWithCustomToken(auth, __initial_auth_token);
-            } else if (isPreview) {
-              await signInAnonymously(auth);
-            }
-          } catch (e) {
-            console.error("Auth error", e);
-          }
-        };
-        initAuth();
-
         const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
           setUser(currentUser);
           setIsAuthLoading(false);
@@ -121,8 +105,8 @@
       useEffect(() => {
         if (!user) return;
 
-        const booksRef = collection(db, isPreview ? `artifacts/${appId}/users` : 'users', user.uid, 'books');
-        const txRef = collection(db, isPreview ? `artifacts/${appId}/users` : 'users', user.uid, 'transactions');
+        const booksRef = collection(db, 'users', user.uid, 'books');
+        const txRef = collection(db, 'users', user.uid, 'transactions');
 
         const unsubBooks = onSnapshot(booksRef, async (snapshot) => {
           const booksData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -134,7 +118,7 @@
               { id: '5', name: '我的主帳本', type: 'standard', targetAmount: 0 }
             ];
             for (const b of defaultBooks) {
-              await setDoc(doc(db, isPreview ? `artifacts/${appId}/users` : 'users', user.uid, 'books', b.id), b);
+              await setDoc(doc(db, 'users', user.uid, 'books', b.id), b);
             }
           } else {
             setBooks(booksData);
@@ -212,7 +196,7 @@
         };
 
         try {
-          await setDoc(doc(db, isPreview ? `artifacts/${appId}/users` : 'users', user.uid, 'transactions', newId), newTx);
+          await setDoc(doc(db, 'users', user.uid, 'transactions', newId), newTx);
           if (currentBook?.type === 'target') setSelectedMonth(formData.date.substring(0, 7));
           setFormData({ ...formData, amount: '', title: '', isCompleted: false });
         } catch(err) {
@@ -242,7 +226,7 @@
         e.stopPropagation();
         if (!editTxFormData.amount || !editTxFormData.title || !user) return;
         try {
-          await setDoc(doc(db, isPreview ? `artifacts/${appId}/users` : 'users', user.uid, 'transactions', editingTxId), { 
+          await setDoc(doc(db, 'users', user.uid, 'transactions', editingTxId), { 
             ...editTxFormData, 
             amount: Number(editTxFormData.amount) 
           }, { merge: true });
@@ -258,7 +242,7 @@
         e.stopPropagation();
         if (!user) return;
         try {
-          await deleteDoc(doc(db, isPreview ? `artifacts/${appId}/users` : 'users', user.uid, 'transactions', id));
+          await deleteDoc(doc(db, 'users', user.uid, 'transactions', id));
         } catch(err) {
           console.error(err);
         }
@@ -277,7 +261,7 @@
         if (!editFormData.name || !user) return;
         try {
           const bookToEdit = books.find(b => b.id === editingBookId);
-          await setDoc(doc(db, isPreview ? `artifacts/${appId}/users` : 'users', user.uid, 'books', editingBookId), {
+          await setDoc(doc(db, 'users', user.uid, 'books', editingBookId), {
             name: editFormData.name,
             targetAmount: bookToEdit?.type === 'target' ? Number(editFormData.targetAmount) : 0
           }, { merge: true });
@@ -293,7 +277,7 @@
         e.stopPropagation();
         if (books.length <= 1 || !user) return alert('至少要保留一個帳本喔！');
         try {
-          await deleteDoc(doc(db, isPreview ? `artifacts/${appId}/users` : 'users', user.uid, 'books', id));
+          await deleteDoc(doc(db, 'users', user.uid, 'books', id));
           if (currentBookId === id) setCurrentBookId(books.filter(b => b.id !== id)[0].id);
         } catch(err) {
           console.error(err);
@@ -305,7 +289,7 @@
         if (!newBookData.name || !user) return;
         const newId = Date.now().toString();
         try {
-          await setDoc(doc(db, isPreview ? `artifacts/${appId}/users` : 'users', user.uid, 'books', newId), {
+          await setDoc(doc(db, 'users', user.uid, 'books', newId), {
             id: newId,
             name: newBookData.name,
             type: newBookData.type,
@@ -720,9 +704,7 @@
                 <div className="p-6 border-b border-gray-100 flex justify-between items-center shrink-0">
                   <h2 className="text-xl font-black flex items-center gap-2"><Settings size={20} className="text-gray-400" /> 帳本管理</h2>
                   <div className="flex items-center gap-2">
-                    {!isPreview && (
-                      <button onClick={() => signOut(auth)} className="text-xs font-black bg-gray-100 text-gray-500 px-3 py-1.5 rounded-lg hover:bg-gray-200 transition-colors">登出</button>
-                    )}
+                    <button onClick={() => signOut(auth)} className="text-xs font-black bg-gray-100 text-gray-500 px-3 py-1.5 rounded-lg hover:bg-gray-200 transition-colors">登出</button>
                     <button onClick={() => setIsManageBooksOpen(false)} className="p-2 bg-gray-100 rounded-full hover:bg-gray-200"><X size={20} /></button>
                   </div>
                 </div>
