@@ -5,8 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>家族理財秘書</title>
   
+  <!-- 載入 Tailwind CSS 樣式 -->
   <script src="https://cdn.tailwindcss.com"></script>
   
+  <!-- 設定模組路徑，讓瀏覽器看得懂 React 和 Firebase -->
   <script type="importmap">
     {
       "imports": {
@@ -20,26 +22,33 @@
     }
   </script>
   
+  <!-- 載入 Babel (用來將 React 語法轉譯給瀏覽器) -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   
   <style>
+    /* 隱藏捲軸但保留捲動功能的樣式 */
     .scrollbar-hide::-webkit-scrollbar { display: none; }
     .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
   </style>
 </head>
 <body class="bg-[#FDF8F5]">
   
+  <!-- App 會渲染在這個 div 裡面 -->
   <div id="root"></div>
 
+  <!-- 主程式邏輯 -->
   <script type="text/babel" data-type="module">
     import React, { useState, useMemo, useEffect } from 'react';
     import { createRoot } from 'react-dom/client';
     import { ChevronLeft, ChevronRight, Plus, List, X, BookHeart, TrendingUp, TrendingDown, Wallet, Search, Trash2, Settings, Target, CheckCircle2, Share2, Camera, CheckSquare, Edit2, Check } from 'lucide-react';
     
     import { initializeApp } from 'firebase/app';
-    import { getAuth, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signOut, signInAnonymously, signInWithCustomToken } from 'firebase/auth';
+    import { getAuth, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
     import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc } from 'firebase/firestore';
 
+    // ==========================================
+    // 專屬於妳的 Firebase 雲端金庫鑰匙 🔑
+    // ==========================================
     const firebaseConfig = {
       apiKey: "AIzaSyCyrzCgmatWzD0vlYhO3Zam3PCFqs_381Y",
       authDomain: "family-ledger-f0684.firebaseapp.com",
@@ -56,33 +65,40 @@
     const db = getFirestore(app);
 
     function App() {
+      // --- 認證與登入狀態 ---
       const [user, setUser] = useState(null);
       const [isAuthLoading, setIsAuthLoading] = useState(true);
       const [loginError, setLoginError] = useState('');
 
+      // --- 雲端資料狀態 ---
       const [books, setBooks] = useState([]);
       const [transactions, setTransactions] = useState([]);
       const [currentBookId, setCurrentBookId] = useState('');
 
+      // --- UI 控制狀態 ---
       const [isAddModalOpen, setIsAddModalOpen] = useState(false);
       const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
       const [isManageBooksOpen, setIsManageBooksOpen] = useState(false);
       const [isShareViewOpen, setIsShareViewOpen] = useState(false);
       
-      const [currentDate, setCurrentDate] = useState(new Date(2026, 4, 29));
+      const [currentDate, setCurrentDate] = useState(new Date(2026, 4, 29)); // 預設顯示 2026 年 5 月
       const [selectedDate, setSelectedDate] = useState(null);
       const [selectedMonth, setSelectedMonth] = useState('2026-05');
       const [searchQuery, setSearchQuery] = useState('');
 
-      const [formData, setFormData] = useState({ date: new Date().toISOString().split('T')[0], type: 'expense', amount: '', title: '', isCompleted: false });
+      // 加入 targetMonth 欄位，用來指定「歸屬月份」
+      const [formData, setFormData] = useState({ date: new Date().toISOString().split('T')[0], targetMonth: new Date().toISOString().substring(0, 7), type: 'expense', amount: '', title: '', isCompleted: false });
       const [newBookData, setNewBookData] = useState({ name: '', type: 'standard', targetAmount: '' });
       
+      // 編輯帳本狀態
       const [editingBookId, setEditingBookId] = useState(null);
       const [editFormData, setEditFormData] = useState({ name: '', targetAmount: '' });
 
+      // 編輯明細狀態
       const [editingTxId, setEditingTxId] = useState(null);
-      const [editTxFormData, setEditTxFormData] = useState({ date: '', type: 'expense', amount: '', title: '', isCompleted: false });
+      const [editTxFormData, setEditTxFormData] = useState({ date: '', targetMonth: '', type: 'expense', amount: '', title: '', isCompleted: false });
 
+      // --- 1. 處理會員登入 (Auth) ---
       useEffect(() => {
         const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
           setUser(currentUser);
@@ -102,6 +118,7 @@
         }
       };
 
+      // --- 2. 監聽雲端資料庫 (Firestore) - 強制鎖定正式版路徑 ---
       useEffect(() => {
         if (!user) return;
 
@@ -135,6 +152,8 @@
         return () => { unsubBooks(); unsubTx(); };
       }, [user, currentBookId]);
 
+
+      // --- 衍生資料 ---
       const currentBook = books.find(b => b.id === currentBookId);
       const currentYear = currentDate.getFullYear();
 
@@ -157,7 +176,12 @@
 
       const getMonthData = (year, monthNum) => {
         const prefix = `${year}-${String(monthNum).padStart(2, '0')}`;
-        const monthTxs = transactions.filter(t => t.bookId === currentBookId && t.date.startsWith(prefix));
+        // 修改：使用 targetMonth 判斷歸屬月份，如果舊資料沒有，才用實際 date
+        const monthTxs = transactions.filter(t => {
+            if (t.bookId !== currentBookId) return false;
+            const txTarget = t.targetMonth || t.date.substring(0, 7);
+            return txTarget === prefix;
+        });
         const sum = monthTxs.reduce((acc, t) => acc + (t.type === 'income' ? t.amount : -t.amount), 0);
         const isCompleted = monthTxs.some(t => t.isCompleted);
         const isTargetReached = sum >= (currentBook?.targetAmount || 0); 
@@ -180,6 +204,7 @@
         return amount.toString();
       };
 
+      // --- 互動處理 (新增與編輯明細) ---
       const handleAddTransaction = async (e) => {
         e.preventDefault();
         if (!formData.amount || !formData.title || !user) return;
@@ -189,6 +214,8 @@
           id: newId,
           bookId: currentBookId,
           date: formData.date,
+          // 如果是家用帳本，存入指定的歸屬月份
+          targetMonth: currentBook?.type === 'target' ? formData.targetMonth : formData.date.substring(0, 7),
           type: currentBook?.type === 'target' ? 'income' : formData.type,
           amount: Number(formData.amount),
           title: formData.title,
@@ -197,7 +224,7 @@
 
         try {
           await setDoc(doc(db, 'users', user.uid, 'transactions', newId), newTx);
-          if (currentBook?.type === 'target') setSelectedMonth(formData.date.substring(0, 7));
+          if (currentBook?.type === 'target') setSelectedMonth(formData.targetMonth);
           setFormData({ ...formData, amount: '', title: '', isCompleted: false });
         } catch(err) {
           console.error(err);
@@ -206,19 +233,11 @@
         }
       };
 
-      // 修正：強化點擊阻擋，並給予完整預設值防止 React 報錯
       const startEditTx = (tx, e) => {
-        e.preventDefault();  // 阻擋預設行為
-        e.stopPropagation(); // 阻擋事件冒泡
+        e.preventDefault();
+        e.stopPropagation(); // 魔法防干擾：避免點擊事件被背景吃掉
         setEditingTxId(tx.id);
-        setEditTxFormData({ 
-          ...tx,
-          amount: tx.amount || '',
-          title: tx.title || '',
-          date: tx.date || '',
-          type: tx.type || 'expense',
-          isCompleted: !!tx.isCompleted // 確保是 boolean
-        });
+        setEditTxFormData({ ...tx, targetMonth: tx.targetMonth || tx.date.substring(0, 7) });
       };
 
       const saveEditTx = async (e) => {
@@ -228,7 +247,8 @@
         try {
           await setDoc(doc(db, 'users', user.uid, 'transactions', editingTxId), { 
             ...editTxFormData, 
-            amount: Number(editTxFormData.amount) 
+            amount: Number(editTxFormData.amount),
+            targetMonth: currentBook?.type === 'target' ? editTxFormData.targetMonth : editTxFormData.date.substring(0, 7)
           }, { merge: true });
         } catch(err) {
           console.error(err);
@@ -248,9 +268,10 @@
         }
       };
 
+      // --- 互動處理 (帳本編輯) ---
       const startEditBook = (book, e) => {
         e.preventDefault();
-        e.stopPropagation();
+        e.stopPropagation(); 
         setEditingBookId(book.id);
         setEditFormData({ name: book.name, targetAmount: book.targetAmount || '' });
       };
@@ -315,14 +336,24 @@
         setSelectedDate(null);
       };
 
+      // --- 獨立抽取：渲染單筆明細卡片 ---
       const renderTxItem = (tx) => {
         if (editingTxId === tx.id) {
           return (
-            <div key={tx.id} className="bg-white p-4 rounded-2xl shadow-md border-2 border-rose-300 flex flex-col gap-3 animate-in fade-in w-full relative z-10">
-              <div className="flex justify-between items-center mb-1">
-                <span className="text-xs font-black text-rose-500 bg-rose-50 px-2 py-1 rounded-md">編輯模式</span>
+            <div key={tx.id} className="bg-white p-4 rounded-2xl shadow-sm border border-rose-200 flex flex-col gap-3 animate-in fade-in w-full">
+              
+              {currentBook?.type === 'target' && (
+                <div className="flex flex-col gap-1.5 p-2.5 bg-rose-50 rounded-xl border border-rose-100">
+                  <label className="text-[10px] font-black text-rose-500">歸屬結算月份</label>
+                  <input type="month" value={editTxFormData.targetMonth} onChange={e => setEditTxFormData({...editTxFormData, targetMonth: e.target.value})} className="w-full bg-transparent outline-none font-bold text-sm text-rose-700" />
+                </div>
+              )}
+
+              <div className="flex flex-col gap-1.5 p-2.5 bg-gray-50 rounded-xl border border-transparent focus-within:border-gray-300">
+                <label className="text-[10px] font-black text-gray-400">實際付款日期</label>
+                <input type="date" value={editTxFormData.date} onChange={e => setEditTxFormData({...editTxFormData, date: e.target.value})} className="w-full bg-transparent outline-none font-bold text-sm" />
               </div>
-              <input type="date" value={editTxFormData.date} onChange={e => setEditTxFormData({...editTxFormData, date: e.target.value})} className="w-full bg-gray-50 p-2.5 rounded-xl outline-none font-bold text-sm border border-transparent focus:border-rose-400" />
+              
               <input type="text" value={editTxFormData.title} onChange={e => setEditTxFormData({...editTxFormData, title: e.target.value})} className="w-full bg-gray-50 p-2.5 rounded-xl outline-none font-bold text-sm border border-transparent focus:border-rose-400" placeholder="請輸入項目名稱" />
               <div className="flex items-center gap-2 bg-gray-50 p-2.5 rounded-xl border border-transparent focus-within:border-rose-400">
                 <span className="text-gray-400 font-bold text-xs shrink-0">NT$</span>
@@ -336,22 +367,25 @@
               )}
               {currentBook?.type === 'target' && (
                 <label className={`flex items-center gap-2 p-2.5 rounded-xl cursor-pointer transition-colors border ${editTxFormData.isCompleted ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-transparent'}`}>
-                  <input type="checkbox" checked={!!editTxFormData.isCompleted} onChange={e => setEditTxFormData({...editTxFormData, isCompleted: e.target.checked})} className="w-4 h-4 text-green-500 rounded accent-green-500" />
+                  <input type="checkbox" checked={editTxFormData.isCompleted} onChange={e => setEditTxFormData({...editTxFormData, isCompleted: e.target.checked})} className="w-4 h-4 text-green-500 rounded accent-green-500" />
                   <span className="text-xs font-black text-green-700">確認結算此月</span>
                 </label>
               )}
-              <div className="flex justify-end gap-2 mt-2">
-                <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setEditingTxId(null); }} className="px-5 py-2.5 bg-gray-100 text-gray-600 rounded-xl text-xs font-black hover:bg-gray-200 transition-colors">取消</button>
-                <button type="button" onClick={saveEditTx} className="px-5 py-2.5 bg-rose-500 text-white rounded-xl text-xs font-black flex items-center gap-1 hover:bg-rose-600 transition-colors shadow-md shadow-rose-500/20"><Check size={14}/>儲存</button>
+              <div className="flex justify-end gap-2 mt-1">
+                <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); setEditingTxId(null); }} className="px-4 py-2 bg-gray-100 text-gray-500 rounded-xl text-xs font-black hover:bg-gray-200 transition-colors">取消</button>
+                <button onClick={saveEditTx} className="px-4 py-2 bg-rose-500 text-white rounded-xl text-xs font-black flex items-center gap-1 hover:bg-rose-600 transition-colors"><Check size={14}/>儲存</button>
               </div>
             </div>
           );
         }
 
         return (
-          <div key={tx.id} className="bg-white p-3.5 rounded-2xl flex items-center justify-between shadow-sm border border-gray-50 hover:border-rose-100 transition-colors group w-full relative">
+          <div key={tx.id} className="bg-white p-4 rounded-2xl flex items-center justify-between shadow-sm border border-gray-50 hover:border-rose-100 transition-colors group w-full cursor-pointer">
             <div className="flex flex-col gap-1.5 flex-1 pr-2 min-w-0">
-              <span className="text-[10px] font-black text-gray-400 bg-gray-100 px-2 py-0.5 rounded-md w-fit tracking-wider">{tx.date}</span>
+              <span className={`text-[10px] font-black px-2 py-0.5 rounded-md w-fit tracking-wider ${currentBook?.type === 'target' ? 'bg-rose-50 text-rose-500' : 'bg-gray-100 text-gray-400'}`}>
+                {/* 貼心提示：家用版會明確顯示「付款日」字眼 */}
+                {currentBook?.type === 'target' ? `付款日 ${tx.date}` : tx.date}
+              </span>
               <span className="font-bold text-gray-700 flex items-center gap-1.5 truncate text-sm">
                 {tx.isCompleted && <CheckCircle2 size={16} className="text-green-500 shrink-0" />} 
                 <span className="truncate">{tx.title}</span>
@@ -361,20 +395,21 @@
               <span className={`font-black text-lg ${tx.type === 'income' ? 'text-green-500' : 'text-rose-500'}`}>
                 {tx.type === 'income' ? '+' : '-'}${tx.amount.toLocaleString()}
               </span>
-              {/* 修正：增加 gap-1.5 和 padding (p-2) 讓手機版更容易按到，並補上 type="button" */}
-              <div className="flex flex-col gap-1.5 pl-2 border-l border-gray-100 ml-1">
-                <button type="button" onClick={(e) => startEditTx(tx, e)} className="p-2 text-gray-300 hover:text-blue-500 hover:bg-blue-50 rounded-xl transition-colors cursor-pointer"><Edit2 size={16} /></button>
-                <button type="button" onClick={(e) => deleteTx(tx.id, e)} className="p-2 text-gray-300 hover:text-rose-500 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer"><Trash2 size={16} /></button>
+              <div className="flex flex-col gap-2 pl-2 border-l border-gray-100">
+                <button onClick={(e) => startEditTx(tx, e)} className="p-2 text-gray-300 hover:text-blue-500 hover:bg-blue-50 rounded-lg transition-colors bg-gray-50/50"><Edit2 size={16} /></button>
+                <button onClick={(e) => deleteTx(tx.id, e)} className="p-2 text-gray-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-colors bg-gray-50/50"><Trash2 size={16} /></button>
               </div>
             </div>
           </div>
         );
       };
 
+      // --- 渲染：全螢幕載入中 ---
       if (isAuthLoading) {
         return <div className="min-h-screen bg-[#FDF8F5] flex items-center justify-center font-black text-rose-400 text-xl tracking-widest">載入中...</div>;
       }
 
+      // --- 渲染：Google 登入畫面 ---
       if (!user) {
         return (
           <div className="min-h-screen bg-[#FDF8F5] flex items-center justify-center p-4 font-sans text-gray-800">
@@ -397,10 +432,12 @@
         return <div className="min-h-screen bg-[#FDF8F5] flex items-center justify-center font-black text-rose-400 text-xl tracking-widest">初始化專屬帳本中...</div>;
       }
 
+      // --- 渲染：主畫面 ---
       return (
         <div className="min-h-screen bg-[#FDF8F5] font-sans text-gray-800 flex justify-center pb-28">
           <div className="w-full max-w-md bg-[#FDF8F5] min-h-screen flex flex-col relative">
             
+            {/* 頂部卡片 */}
             <div className="p-4 z-10 shrink-0">
               <div className="bg-white rounded-3xl p-5 shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-rose-50 relative overflow-hidden">
                 <div className="absolute top-[-20px] right-[-20px] w-24 h-24 bg-rose-200/50 rounded-full blur-2xl"></div>
@@ -442,8 +479,10 @@
               </div>
             </div>
 
+            {/* 內容區域 */}
             <div className="px-4 pb-4 flex flex-col gap-4">
               
+              {/* 家用版 */}
               {currentBook?.type === 'target' && (
                 <div className="flex flex-col gap-4">
                   <div className="flex justify-between items-center px-4 bg-white py-3 rounded-2xl shadow-[0_4px_20px_rgb(0,0,0,0.03)] border border-rose-50">
@@ -515,6 +554,7 @@
                 </div>
               )}
 
+              {/* 一般版 */}
               {currentBook?.type === 'standard' && (
                 <div className="flex flex-col gap-4">
                   <div className="flex justify-between items-center px-4 bg-white py-3 rounded-2xl shadow-[0_4px_20px_rgb(0,0,0,0.03)] border border-rose-50">
@@ -583,6 +623,7 @@
               )}
             </div>
 
+            {/* 底部懸浮按鈕區 */}
             <div className="fixed bottom-4 left-0 right-0 px-4 flex justify-center z-40 pointer-events-none">
               <div className="w-full max-w-md flex gap-3 pointer-events-auto bg-white/70 backdrop-blur-xl p-2 rounded-[2rem] shadow-[0_10px_40px_rgba(0,0,0,0.1)] border border-white">
                 <button 
@@ -593,8 +634,12 @@
                 </button>
                 <button 
                   onClick={() => {
-                    const defaultDate = currentBook?.type === 'target' ? `${selectedMonth}-01` : (selectedDate || new Date().toISOString().split('T')[0]);
-                    setFormData({ ...formData, date: defaultDate, isCompleted: false });
+                    const todayStr = new Date().toISOString().split('T')[0];
+                    // 如果在一般版，預設選中的日期；如果是家用版，預設當天，且預設目標月為現在查看的月
+                    const defaultDate = currentBook?.type === 'standard' && selectedDate ? selectedDate : todayStr;
+                    const defaultTargetMonth = currentBook?.type === 'target' ? selectedMonth : defaultDate.substring(0, 7);
+                    
+                    setFormData({ ...formData, date: defaultDate, targetMonth: defaultTargetMonth, isCompleted: false });
                     setIsAddModalOpen(true);
                   }}
                   className="flex-[1.5] bg-rose-500 text-white py-3.5 rounded-full font-black flex items-center justify-center gap-2 shadow-[0_4px_15px_rgba(244,63,94,0.3)] hover:bg-rose-600 transition-all active:scale-95"
@@ -605,6 +650,7 @@
             </div>
           </div>
 
+          {/* 彈出視窗：新增記帳 */}
           {isAddModalOpen && (
             <div className="fixed inset-0 bg-gray-900/40 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-4">
               <div className="bg-white w-full max-w-md rounded-[2.5rem] p-7 relative shadow-2xl">
@@ -628,8 +674,16 @@
                   )}
 
                   <div className="space-y-4">
+                    {/* 家用版專屬：歸屬月份 */}
+                    {currentBook?.type === 'target' && (
+                      <div className="bg-rose-50 p-4 rounded-2xl border border-rose-100">
+                        <label className="text-xs font-black text-rose-500 mb-1 block">結算歸屬月份 (此筆費用算在哪個月)</label>
+                        <input type="month" value={formData.targetMonth} onChange={(e) => setFormData({...formData, targetMonth: e.target.value})} className="w-full bg-transparent outline-none font-bold text-rose-700" required />
+                      </div>
+                    )}
+
                     <div className="bg-gray-50 p-4 rounded-2xl">
-                      <label className="text-xs font-black text-gray-400 mb-1 block">日期</label>
+                      <label className="text-xs font-black text-gray-400 mb-1 block">實際付款日期</label>
                       <input type="date" value={formData.date} onChange={(e) => setFormData({...formData, date: e.target.value})} className="w-full bg-transparent outline-none font-bold text-gray-700" required />
                     </div>
 
@@ -665,6 +719,7 @@
             </div>
           )}
 
+          {/* 彈出視窗：所有明細 */}
           {isDetailsModalOpen && (
             <div className="fixed inset-0 bg-gray-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
               <div className="bg-white w-full max-w-md h-[85vh] rounded-[2.5rem] flex flex-col overflow-hidden relative shadow-2xl">
@@ -698,6 +753,7 @@
             </div>
           )}
 
+          {/* 彈出視窗：管理帳本 */}
           {isManageBooksOpen && (
             <div className="fixed inset-0 bg-gray-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
               <div className="bg-white w-full max-w-md max-h-[85vh] rounded-[2.5rem] flex flex-col overflow-hidden relative shadow-2xl">
@@ -784,6 +840,7 @@
             </div>
           )}
 
+          {/* 彈出視窗：分享畫面 */}
           {isShareViewOpen && (
             <div className="fixed inset-0 bg-gray-900/90 backdrop-blur-md flex flex-col items-center justify-center z-[60] p-4">
               <div className="bg-[#FDF8F5] w-full max-w-sm rounded-[2.5rem] p-7 shadow-2xl relative overflow-y-auto max-h-[85vh] scrollbar-hide">
@@ -875,7 +932,8 @@
                           getMonthData(currentYear, parseInt(selectedMonth.split('-')[1])).monthTxs.map(tx => (
                             <div key={tx.id} className="flex justify-between items-center text-xs bg-white/70 p-2.5 rounded-xl border border-white">
                               <span className="text-gray-600 font-bold flex-1 truncate flex items-center gap-1.5">
-                                <span className="text-[9px] bg-white text-rose-300 px-1 rounded shadow-sm">{tx.date.slice(5)}</span>
+                                {/* 分享畫面也清楚標示付款日 */}
+                                <span className="text-[9px] bg-white text-rose-400 px-1 rounded shadow-sm border border-rose-50">付 {tx.date.slice(5)}</span>
                                 {tx.title}
                               </span>
                               <span className="font-black text-green-500 ml-2">+{tx.amount.toLocaleString()}</span>
@@ -895,6 +953,7 @@
       );
     }
 
+    // 啟動 React
     const root = createRoot(document.getElementById('root'));
     root.render(<App />);
   </script>
