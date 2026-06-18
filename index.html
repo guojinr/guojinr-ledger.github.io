@@ -5,6 +5,16 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>家族理財秘書</title>
   
+  <!-- 軍師專屬：錯誤偵測雷達 (遇到白畫面會顯示紅色錯誤方便我們抓蟲) -->
+  <script>
+    window.addEventListener('error', function(event) {
+      var errorDiv = document.createElement('div');
+      errorDiv.style.cssText = 'position:fixed;top:0;left:0;width:100%;background:rgba(239,68,68,0.95);color:white;padding:15px;z-index:99999;font-family:sans-serif;font-size:12px;word-break:break-all;border-bottom:4px solid #b91c1c;';
+      errorDiv.innerHTML = '<strong style="font-size:16px;">🚨 軍師偵測到錯誤！請截圖給我看：</strong><br/><br/>' + event.message + '<br/><br/><small>' + event.filename + ' (行數: ' + event.lineno + ')</small>';
+      document.body.appendChild(errorDiv);
+    });
+  </script>
+
   <!-- 載入 Tailwind CSS 樣式 -->
   <script src="https://cdn.tailwindcss.com"></script>
   
@@ -13,6 +23,7 @@
     {
       "imports": {
         "react": "https://esm.sh/react@18.2.0",
+        "react/jsx-runtime": "https://esm.sh/react@18.2.0/jsx-runtime",
         "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
         "lucide-react": "https://esm.sh/lucide-react@0.292.0",
         "firebase/app": "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js",
@@ -81,20 +92,17 @@
       const [isManageBooksOpen, setIsManageBooksOpen] = useState(false);
       const [isShareViewOpen, setIsShareViewOpen] = useState(false);
       
-      const [currentDate, setCurrentDate] = useState(new Date(2026, 4, 29)); // 預設顯示 2026 年 5 月
+      const [currentDate, setCurrentDate] = useState(new Date(2026, 4, 29)); 
       const [selectedDate, setSelectedDate] = useState(null);
       const [selectedMonth, setSelectedMonth] = useState('2026-05');
       const [searchQuery, setSearchQuery] = useState('');
 
-      // 加入 targetMonth 欄位，用來指定「歸屬月份」
       const [formData, setFormData] = useState({ date: new Date().toISOString().split('T')[0], targetMonth: new Date().toISOString().substring(0, 7), type: 'expense', amount: '', title: '', isCompleted: false });
       const [newBookData, setNewBookData] = useState({ name: '', type: 'standard', targetAmount: '' });
       
-      // 編輯帳本狀態
       const [editingBookId, setEditingBookId] = useState(null);
       const [editFormData, setEditFormData] = useState({ name: '', targetAmount: '' });
 
-      // 編輯明細狀態
       const [editingTxId, setEditingTxId] = useState(null);
       const [editTxFormData, setEditTxFormData] = useState({ date: '', targetMonth: '', type: 'expense', amount: '', title: '', isCompleted: false });
 
@@ -114,11 +122,11 @@
           await signInWithPopup(auth, provider);
         } catch (error) {
           console.error(error);
-          setLoginError('登入失敗，請確認已在 Firebase 加入網域！');
+          setLoginError('登入失敗，請確認網路連線或授權設定喔！');
         }
       };
 
-      // --- 2. 監聽雲端資料庫 (Firestore) - 強制鎖定正式版路徑 ---
+      // --- 2. 監聽雲端資料庫 (防彈資料清洗機制) ---
       useEffect(() => {
         if (!user) return;
 
@@ -126,7 +134,16 @@
         const txRef = collection(db, 'users', user.uid, 'transactions');
 
         const unsubBooks = onSnapshot(booksRef, async (snapshot) => {
-          const booksData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+          // 清洗帳本資料，確保欄位不會遺失
+          const booksData = snapshot.docs.map(doc => {
+            const data = doc.data();
+            return {
+              id: doc.id,
+              name: data.name || '未命名帳本',
+              type: data.type || 'standard',
+              targetAmount: Number(data.targetAmount) || 0
+            };
+          });
           
           if (booksData.length === 0) {
             const defaultBooks = [
@@ -146,12 +163,25 @@
         }, console.error);
 
         const unsubTx = onSnapshot(txRef, (snapshot) => {
-          setTransactions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+          // 清洗明細資料，確保就算是亂存的舊資料也絕對不會讓畫面全白
+          const safeTransactions = snapshot.docs.map(doc => {
+            const data = doc.data();
+            return {
+              id: doc.id,
+              bookId: data.bookId || '',
+              date: data.date || new Date().toISOString().split('T')[0],
+              targetMonth: data.targetMonth || data.date?.substring(0, 7) || new Date().toISOString().substring(0, 7),
+              type: data.type || 'expense',
+              amount: Number(data.amount) || 0,
+              title: data.title || '無標題',
+              isCompleted: !!data.isCompleted
+            };
+          });
+          setTransactions(safeTransactions);
         }, console.error);
 
         return () => { unsubBooks(); unsubTx(); };
       }, [user, currentBookId]);
-
 
       // --- 衍生資料 ---
       const currentBook = books.find(b => b.id === currentBookId);
@@ -176,7 +206,6 @@
 
       const getMonthData = (year, monthNum) => {
         const prefix = `${year}-${String(monthNum).padStart(2, '0')}`;
-        // 修改：使用 targetMonth 判斷歸屬月份，如果舊資料沒有，才用實際 date
         const monthTxs = transactions.filter(t => {
             if (t.bookId !== currentBookId) return false;
             const txTarget = t.targetMonth || t.date.substring(0, 7);
@@ -200,26 +229,28 @@
       };
 
       const formatAmountForGrid = (amount) => {
+        if (!amount) return '0';
         if (amount >= 100000) return (amount / 1000).toFixed(0) + 'k';
         return amount.toString();
       };
 
-      // --- 互動處理 (新增與編輯明細) ---
+      // --- 互動處理 ---
       const handleAddTransaction = async (e) => {
         e.preventDefault();
         if (!formData.amount || !formData.title || !user) return;
         
         const newId = Date.now().toString();
+        const safeDate = formData.date || new Date().toISOString().split('T')[0];
+        
         const newTx = {
           id: newId,
           bookId: currentBookId,
-          date: formData.date,
-          // 如果是家用帳本，存入指定的歸屬月份
-          targetMonth: currentBook?.type === 'target' ? formData.targetMonth : formData.date.substring(0, 7),
+          date: safeDate,
+          targetMonth: currentBook?.type === 'target' ? formData.targetMonth : safeDate.substring(0, 7),
           type: currentBook?.type === 'target' ? 'income' : formData.type,
-          amount: Number(formData.amount),
-          title: formData.title,
-          isCompleted: formData.isCompleted
+          amount: Number(formData.amount) || 0,
+          title: formData.title || '',
+          isCompleted: !!formData.isCompleted
         };
 
         try {
@@ -235,20 +266,24 @@
 
       const startEditTx = (tx, e) => {
         e.preventDefault();
-        e.stopPropagation(); // 魔法防干擾：避免點擊事件被背景吃掉
+        e.stopPropagation(); 
         setEditingTxId(tx.id);
-        setEditTxFormData({ ...tx, targetMonth: tx.targetMonth || tx.date.substring(0, 7) });
+        setEditTxFormData({ ...tx, targetMonth: tx.targetMonth || tx.date?.substring(0, 7) || '' });
       };
 
       const saveEditTx = async (e) => {
         e.preventDefault();
         e.stopPropagation();
         if (!editTxFormData.amount || !editTxFormData.title || !user) return;
+        
+        const safeDate = editTxFormData.date || new Date().toISOString().split('T')[0];
+        
         try {
           await setDoc(doc(db, 'users', user.uid, 'transactions', editingTxId), { 
             ...editTxFormData, 
-            amount: Number(editTxFormData.amount),
-            targetMonth: currentBook?.type === 'target' ? editTxFormData.targetMonth : editTxFormData.date.substring(0, 7)
+            amount: Number(editTxFormData.amount) || 0,
+            date: safeDate,
+            targetMonth: currentBook?.type === 'target' ? editTxFormData.targetMonth : safeDate.substring(0, 7)
           }, { merge: true });
         } catch(err) {
           console.error(err);
@@ -268,7 +303,6 @@
         }
       };
 
-      // --- 互動處理 (帳本編輯) ---
       const startEditBook = (book, e) => {
         e.preventDefault();
         e.stopPropagation(); 
@@ -284,7 +318,7 @@
           const bookToEdit = books.find(b => b.id === editingBookId);
           await setDoc(doc(db, 'users', user.uid, 'books', editingBookId), {
             name: editFormData.name,
-            targetAmount: bookToEdit?.type === 'target' ? Number(editFormData.targetAmount) : 0
+            targetAmount: bookToEdit?.type === 'target' ? (Number(editFormData.targetAmount) || 0) : 0
           }, { merge: true });
         } catch(err) {
           console.error(err);
@@ -314,7 +348,7 @@
             id: newId,
             name: newBookData.name,
             type: newBookData.type,
-            targetAmount: newBookData.type === 'target' ? Number(newBookData.targetAmount) : 0
+            targetAmount: newBookData.type === 'target' ? (Number(newBookData.targetAmount) || 0) : 0
           });
           setNewBookData({ name: '', type: 'standard', targetAmount: '' });
         } catch(err) {
@@ -383,8 +417,7 @@
           <div key={tx.id} className="bg-white p-4 rounded-2xl flex items-center justify-between shadow-sm border border-gray-50 hover:border-rose-100 transition-colors group w-full cursor-pointer">
             <div className="flex flex-col gap-1.5 flex-1 pr-2 min-w-0">
               <span className={`text-[10px] font-black px-2 py-0.5 rounded-md w-fit tracking-wider ${currentBook?.type === 'target' ? 'bg-rose-50 text-rose-500' : 'bg-gray-100 text-gray-400'}`}>
-                {/* 貼心提示：家用版會明確顯示「付款日」字眼 */}
-                {currentBook?.type === 'target' ? `付款日 ${tx.date}` : tx.date}
+                {currentBook?.type === 'target' ? `付款日 ${tx.date || '未知'}` : (tx.date || '未知')}
               </span>
               <span className="font-bold text-gray-700 flex items-center gap-1.5 truncate text-sm">
                 {tx.isCompleted && <CheckCircle2 size={16} className="text-green-500 shrink-0" />} 
@@ -393,7 +426,7 @@
             </div>
             <div className="flex items-center gap-2 shrink-0">
               <span className={`font-black text-lg ${tx.type === 'income' ? 'text-green-500' : 'text-rose-500'}`}>
-                {tx.type === 'income' ? '+' : '-'}${tx.amount.toLocaleString()}
+                {tx.type === 'income' ? '+' : '-'}${tx.amount?.toLocaleString()}
               </span>
               <div className="flex flex-col gap-2 pl-2 border-l border-gray-100">
                 <button onClick={(e) => startEditTx(tx, e)} className="p-2 text-gray-300 hover:text-blue-500 hover:bg-blue-50 rounded-lg transition-colors bg-gray-50/50"><Edit2 size={16} /></button>
@@ -404,12 +437,10 @@
         );
       };
 
-      // --- 渲染：全螢幕載入中 ---
       if (isAuthLoading) {
         return <div className="min-h-screen bg-[#FDF8F5] flex items-center justify-center font-black text-rose-400 text-xl tracking-widest">載入中...</div>;
       }
 
-      // --- 渲染：Google 登入畫面 ---
       if (!user) {
         return (
           <div className="min-h-screen bg-[#FDF8F5] flex items-center justify-center p-4 font-sans text-gray-800">
@@ -432,12 +463,10 @@
         return <div className="min-h-screen bg-[#FDF8F5] flex items-center justify-center font-black text-rose-400 text-xl tracking-widest">初始化專屬帳本中...</div>;
       }
 
-      // --- 渲染：主畫面 ---
       return (
         <div className="min-h-screen bg-[#FDF8F5] font-sans text-gray-800 flex justify-center pb-28">
           <div className="w-full max-w-md bg-[#FDF8F5] min-h-screen flex flex-col relative">
             
-            {/* 頂部卡片 */}
             <div className="p-4 z-10 shrink-0">
               <div className="bg-white rounded-3xl p-5 shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-rose-50 relative overflow-hidden">
                 <div className="absolute top-[-20px] right-[-20px] w-24 h-24 bg-rose-200/50 rounded-full blur-2xl"></div>
@@ -479,10 +508,8 @@
               </div>
             </div>
 
-            {/* 內容區域 */}
             <div className="px-4 pb-4 flex flex-col gap-4">
               
-              {/* 家用版 */}
               {currentBook?.type === 'target' && (
                 <div className="flex flex-col gap-4">
                   <div className="flex justify-between items-center px-4 bg-white py-3 rounded-2xl shadow-[0_4px_20px_rgb(0,0,0,0.03)] border border-rose-50">
@@ -554,7 +581,6 @@
                 </div>
               )}
 
-              {/* 一般版 */}
               {currentBook?.type === 'standard' && (
                 <div className="flex flex-col gap-4">
                   <div className="flex justify-between items-center px-4 bg-white py-3 rounded-2xl shadow-[0_4px_20px_rgb(0,0,0,0.03)] border border-rose-50">
@@ -607,14 +633,14 @@
                   {selectedDate && (
                     <div className="bg-white rounded-3xl p-5 shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-rose-50">
                       <h4 className="font-black text-gray-700 mb-4 flex items-center gap-2">
-                        <span className="text-rose-400">{selectedDate.split('-')[1]} / {selectedDate.split('-')[2]}</span>
+                        <span className="text-rose-400">{selectedDate.split('-')[1] || ''} / {selectedDate.split('-')[2] || ''}</span>
                         <span>明細紀錄</span>
                       </h4>
                       <div className="flex flex-col gap-3">
-                        {getDaySummary(parseInt(selectedDate.split('-')[2])).dayTrans.length === 0 ? (
+                        {getDaySummary(parseInt(selectedDate.split('-')[2] || 0)).dayTrans.length === 0 ? (
                           <p className="text-sm text-gray-400 text-center py-4 bg-gray-50 rounded-2xl">這天沒有紀錄喔</p>
                         ) : (
-                          getDaySummary(parseInt(selectedDate.split('-')[2])).dayTrans.map(tx => renderTxItem(tx))
+                          getDaySummary(parseInt(selectedDate.split('-')[2] || 0)).dayTrans.map(tx => renderTxItem(tx))
                         )}
                       </div>
                     </div>
@@ -623,7 +649,6 @@
               )}
             </div>
 
-            {/* 底部懸浮按鈕區 */}
             <div className="fixed bottom-4 left-0 right-0 px-4 flex justify-center z-40 pointer-events-none">
               <div className="w-full max-w-md flex gap-3 pointer-events-auto bg-white/70 backdrop-blur-xl p-2 rounded-[2rem] shadow-[0_10px_40px_rgba(0,0,0,0.1)] border border-white">
                 <button 
@@ -635,7 +660,6 @@
                 <button 
                   onClick={() => {
                     const todayStr = new Date().toISOString().split('T')[0];
-                    // 如果在一般版，預設選中的日期；如果是家用版，預設當天，且預設目標月為現在查看的月
                     const defaultDate = currentBook?.type === 'standard' && selectedDate ? selectedDate : todayStr;
                     const defaultTargetMonth = currentBook?.type === 'target' ? selectedMonth : defaultDate.substring(0, 7);
                     
@@ -650,7 +674,7 @@
             </div>
           </div>
 
-          {/* 彈出視窗：新增記帳 */}
+          {/* 新增記帳彈跳窗 */}
           {isAddModalOpen && (
             <div className="fixed inset-0 bg-gray-900/40 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-4">
               <div className="bg-white w-full max-w-md rounded-[2.5rem] p-7 relative shadow-2xl">
@@ -674,7 +698,6 @@
                   )}
 
                   <div className="space-y-4">
-                    {/* 家用版專屬：歸屬月份 */}
                     {currentBook?.type === 'target' && (
                       <div className="bg-rose-50 p-4 rounded-2xl border border-rose-100">
                         <label className="text-xs font-black text-rose-500 mb-1 block">結算歸屬月份 (此筆費用算在哪個月)</label>
@@ -719,7 +742,7 @@
             </div>
           )}
 
-          {/* 彈出視窗：所有明細 */}
+          {/* 所有明細視窗 */}
           {isDetailsModalOpen && (
             <div className="fixed inset-0 bg-gray-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
               <div className="bg-white w-full max-w-md h-[85vh] rounded-[2.5rem] flex flex-col overflow-hidden relative shadow-2xl">
@@ -753,7 +776,7 @@
             </div>
           )}
 
-          {/* 彈出視窗：管理帳本 */}
+          {/* 帳本管理視窗 */}
           {isManageBooksOpen && (
             <div className="fixed inset-0 bg-gray-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
               <div className="bg-white w-full max-w-md max-h-[85vh] rounded-[2.5rem] flex flex-col overflow-hidden relative shadow-2xl">
@@ -840,7 +863,7 @@
             </div>
           )}
 
-          {/* 彈出視窗：分享畫面 */}
+          {/* 截圖分享視窗 */}
           {isShareViewOpen && (
             <div className="fixed inset-0 bg-gray-900/90 backdrop-blur-md flex flex-col items-center justify-center z-[60] p-4">
               <div className="bg-[#FDF8F5] w-full max-w-sm rounded-[2.5rem] p-7 shadow-2xl relative overflow-y-auto max-h-[85vh] scrollbar-hide">
@@ -868,7 +891,7 @@
                         {filteredTransactions.slice(0, 8).map(tx => (
                           <div key={tx.id} className="flex justify-between items-center text-sm bg-white/50 p-2.5 rounded-xl">
                             <span className="text-gray-600 font-bold truncate flex-1 flex items-center gap-2">
-                              <span className="text-[10px] bg-gray-100 px-1.5 py-0.5 rounded text-gray-400">{tx.date.slice(5)}</span>
+                              <span className="text-[10px] bg-gray-100 px-1.5 py-0.5 rounded text-gray-400">{tx.date?.slice(5) || ''}</span>
                               {tx.title}
                             </span>
                             <span className={`font-black shrink-0 ml-2 ${tx.type === 'income' ? 'text-green-500' : 'text-rose-400'}`}>
@@ -932,11 +955,10 @@
                           getMonthData(currentYear, parseInt(selectedMonth.split('-')[1])).monthTxs.map(tx => (
                             <div key={tx.id} className="flex justify-between items-center text-xs bg-white/70 p-2.5 rounded-xl border border-white">
                               <span className="text-gray-600 font-bold flex-1 truncate flex items-center gap-1.5">
-                                {/* 分享畫面也清楚標示付款日 */}
-                                <span className="text-[9px] bg-white text-rose-400 px-1 rounded shadow-sm border border-rose-50">付 {tx.date.slice(5)}</span>
+                                <span className="text-[9px] bg-white text-rose-400 px-1 rounded shadow-sm border border-rose-50">付 {tx.date?.slice(5) || ''}</span>
                                 {tx.title}
                               </span>
-                              <span className="font-black text-green-500 ml-2">+{tx.amount.toLocaleString()}</span>
+                              <span className="font-black text-green-500 ml-2">+{tx.amount?.toLocaleString()}</span>
                             </div>
                           ))
                         )}
